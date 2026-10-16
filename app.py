@@ -1,4 +1,3 @@
-import io
 import os
 import tempfile
 import zipfile
@@ -11,19 +10,25 @@ st.set_page_config(page_title="TikTok Downloader", page_icon="🎬", layout="cen
 st.title("🎬 TikTok Downloader")
 st.caption("ទាញយកវីដេអូសាធារណៈច្រើនក្នុងពេលតែមួយ (សម្រាប់មើលផ្ទាល់ខ្លួនប៉ុណ្ណោះ)")
 
-MAX_VIDEOS = 30
-
 links_text = st.text_area(
-    "ដាក់ link (មួយបន្ទាត់ម្ដង) ឬ link profile / playlist",
-    height=180,
-    placeholder="https://www.tiktok.com/@user/video/123...\nhttps://www.tiktok.com/@user",
+    "ដាក់ link (មួយបន្ទាត់ម្ដង) ឬ link profile",
+    height=150,
+    placeholder="https://www.tiktok.com/@smeyai26",
 )
+
+col1, col2 = st.columns(2)
+start = col1.number_input("ចាប់ពីវីដេអូទី", min_value=1, value=1, step=1)
+end = col2.number_input("ដល់វីដេអូទី", min_value=1, value=20, step=1)
 
 if st.button("ទាញយកទាំងអស់", type="primary"):
     links = [l.strip() for l in links_text.splitlines() if l.strip()]
 
     if not links:
         st.warning("សូមដាក់ link យ៉ាងតិចមួយ")
+        st.stop()
+
+    if end < start:
+        st.warning("លេខ 'ដល់' ត្រូវធំជាងលេខ 'ចាប់ពី'")
         st.stop()
 
     tmp_dir = tempfile.mkdtemp()
@@ -42,10 +47,10 @@ if st.button("ទាញយកទាំងអស់", type="primary"):
             bar.progress(1.0)
 
     options = {
-        "outtmpl": os.path.join(tmp_dir, "%(uploader)s_%(title).60s_%(id)s.%(ext)s"),
+        "outtmpl": os.path.join(tmp_dir, "%(playlist_index|0)03d_%(id)s.%(ext)s"),
         "format": "best",
         "ignoreerrors": True,
-        "playlistend": MAX_VIDEOS,
+        "playlist_items": f"{int(start)}-{int(end)}",
         "quiet": True,
         "noprogress": True,
         "progress_hooks": [hook],
@@ -68,28 +73,18 @@ if st.button("ទាញយកទាំងអស់", type="primary"):
 
     status.success(f"ទាញយកបាន {len(files)} វីដេអូ ✅")
 
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_STORED) as zf:
+    zip_path = os.path.join(tmp_dir, "tiktok_videos.zip")
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
         for name in files:
             zf.write(os.path.join(tmp_dir, name), arcname=name)
 
-    st.download_button(
-        "📦 ទាញយកទាំងអស់ជា ZIP",
-        data=zip_buffer.getvalue(),
-        file_name="tiktok_videos.zip",
-        mime="application/zip",
-    )
-
-    st.divider()
-    for i, name in enumerate(files):
-        with open(os.path.join(tmp_dir, name), "rb") as f:
-            st.download_button(
-                f"⬇️ {name[:50]}",
-                data=f.read(),
-                file_name=name,
-                mime="video/mp4",
-                key=f"dl_{i}",
-            )
+    with open(zip_path, "rb") as zf:
+        st.download_button(
+            f"📦 ទាញយក ZIP ({len(files)} វីដេអូ)",
+            data=zf,
+            file_name=f"tiktok_{int(start)}-{int(end)}.zip",
+            mime="application/zip",
+        )
 
 st.divider()
 st.caption(
