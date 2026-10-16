@@ -31,20 +31,35 @@ if st.button("ទាញយកទាំងអស់", type="primary"):
         st.warning("លេខ 'ដល់' ត្រូវធំជាងលេខ 'ចាប់ពី'")
         st.stop()
 
+    total_items = int(end) - int(start) + 1
     tmp_dir = tempfile.mkdtemp()
+
     status = st.empty()
     bar = st.progress(0.0)
-    done = {"count": 0}
+    results_box = st.container()
+    state = {"count": 0}
 
     def hook(d):
         if d["status"] == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
-            if total:
-                bar.progress(min(d["downloaded_bytes"] / total, 1.0))
-            status.info(f"កំពុងទាញយកវីដេអូទី {done['count'] + 1} ...")
+            frac = (d["downloaded_bytes"] / total) if total else 0.0
+            bar.progress(min((state["count"] + frac) / total_items, 1.0))
+            status.info(f"កំពុងទាញយកវីដេអូទី {state['count'] + 1} ...")
         elif d["status"] == "finished":
-            done["count"] += 1
-            bar.progress(1.0)
+            state["count"] += 1
+            bar.progress(min(state["count"] / total_items, 1.0))
+            path = d.get("filename")
+            if path and os.path.exists(path):
+                name = os.path.basename(path)
+                with results_box:
+                    st.download_button(
+                        f"⬇️ ភាគទី {state['count']}: {name[:40]}",
+                        data=open(path, "rb"),
+                        file_name=name,
+                        mime="video/mp4",
+                        key=f"dl_{state['count']}",
+                        on_click="ignore",
+                    )
 
     options = {
         "outtmpl": os.path.join(tmp_dir, "%(playlist_index|0)03d_%(id)s.%(ext)s"),
@@ -71,6 +86,7 @@ if st.button("ទាញយកទាំងអស់", type="primary"):
         status.error("មិនអាចទាញយកបានទេ។ សូមពិនិត្យ link (ត្រូវតែជាវីដេអូសាធារណៈ)")
         st.stop()
 
+    bar.progress(1.0)
     status.success(f"ទាញយកបាន {len(files)} វីដេអូ ✅")
 
     zip_path = os.path.join(tmp_dir, "tiktok_videos.zip")
@@ -84,6 +100,8 @@ if st.button("ទាញយកទាំងអស់", type="primary"):
             data=zf,
             file_name=f"tiktok_{int(start)}-{int(end)}.zip",
             mime="application/zip",
+            key="zip_all",
+            on_click="ignore",
         )
 
 st.divider()
