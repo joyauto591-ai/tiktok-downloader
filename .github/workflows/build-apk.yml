@@ -1,0 +1,369 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - ".github/workflows/build-apk.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Generate Android project
+        run: |
+          set -e
+          mkdir -p android-app/app/src/main/java/com/videodl/app
+          mkdir -p android-app/app/src/main/res/drawable
+          mkdir -p android-app/app/src/main/res/mipmap-anydpi
+          mkdir -p android-app/app/src/main/res/mipmap-anydpi-v26
+
+          cat > android-app/settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "VideoDownloader"
+          include(":app")
+          EOF
+
+          cat > android-app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF
+
+          cat > android-app/gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2g
+          android.nonTransitiveRClass=true
+          EOF
+
+          cat > android-app/app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.videodl.app"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "com.videodl.app"
+                  minSdk = 24
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+          EOF
+
+          cat > android-app/app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission
+                  android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+                  android:maxSdkVersion="28" />
+
+              <application
+                  android:label="Video Downloader"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:allowBackup="false"
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+              </application>
+          </manifest>
+          EOF
+
+          cat > android-app/app/src/main/res/drawable/ic_launcher_background.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:aapt="http://schemas.android.com/aapt"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path android:pathData="M0,0h108v108h-108z">
+                  <aapt:attr name="android:fillColor">
+                      <gradient
+                          android:startX="0"
+                          android:startY="0"
+                          android:endX="108"
+                          android:endY="108"
+                          android:type="linear">
+                          <item android:color="#5B3DF0" android:offset="0.0" />
+                          <item android:color="#8A2BE2" android:offset="0.5" />
+                          <item android:color="#D100FF" android:offset="1.0" />
+                      </gradient>
+                  </aapt:attr>
+              </path>
+          </vector>
+          EOF
+
+          cat > android-app/app/src/main/res/drawable/ic_launcher_foreground.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M43,30L75,50L43,70Z" />
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M37,78h34v6h-34z" />
+          </vector>
+          EOF
+
+          cat > android-app/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/ic_launcher_background" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+              <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          EOF
+
+          cp android-app/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml \
+             android-app/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+
+          cat > android-app/app/src/main/res/mipmap-anydpi/ic_launcher.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+              <item android:drawable="@drawable/ic_launcher_background" />
+              <item android:drawable="@drawable/ic_launcher_foreground" />
+          </layer-list>
+          EOF
+
+          cp android-app/app/src/main/res/mipmap-anydpi/ic_launcher.xml \
+             android-app/app/src/main/res/mipmap-anydpi/ic_launcher_round.xml
+
+          cat > android-app/app/src/main/java/com/videodl/app/MainActivity.kt <<'EOF'
+          package com.videodl.app
+
+          import android.annotation.SuppressLint
+          import android.app.Activity
+          import android.app.AlertDialog
+          import android.app.DownloadManager
+          import android.content.Context
+          import android.net.Uri
+          import android.os.Build
+          import android.os.Bundle
+          import android.os.Environment
+          import android.view.ViewGroup
+          import android.webkit.CookieManager
+          import android.webkit.URLUtil
+          import android.webkit.WebChromeClient
+          import android.webkit.WebResourceError
+          import android.webkit.WebResourceRequest
+          import android.webkit.WebSettings
+          import android.webkit.WebView
+          import android.webkit.WebViewClient
+          import android.widget.EditText
+          import android.widget.Toast
+
+          class MainActivity : Activity() {
+
+              private lateinit var web: WebView
+              private var dialogShowing = false
+
+              private val prefs by lazy {
+                  getSharedPreferences("app", Context.MODE_PRIVATE)
+              }
+
+              @SuppressLint("SetJavaScriptEnabled")
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+
+                  if (Build.VERSION.SDK_INT <= 28) {
+                      requestPermissions(
+                          arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                          1
+                      )
+                  }
+
+                  web = WebView(this)
+                  web.layoutParams = ViewGroup.LayoutParams(
+                      ViewGroup.LayoutParams.MATCH_PARENT,
+                      ViewGroup.LayoutParams.MATCH_PARENT
+                  )
+                  setContentView(web)
+
+                  val s = web.settings
+                  s.javaScriptEnabled = true
+                  s.domStorageEnabled = true
+                  s.mediaPlaybackRequiresUserGesture = false
+                  s.useWideViewPort = true
+                  s.loadWithOverviewMode = true
+                  s.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+
+                  web.webChromeClient = WebChromeClient()
+                  web.webViewClient = object : WebViewClient() {
+                      override fun onReceivedError(
+                          view: WebView?,
+                          request: WebResourceRequest?,
+                          error: WebResourceError?
+                      ) {
+                          if (request?.isForMainFrame == true) {
+                              askUrl("មិនអាចភ្ជាប់បានទេ។ សូមពិនិត្យ URL ឬអ៊ីនធឺណិត។")
+                          }
+                      }
+                  }
+
+                  web.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+                      startDownload(url, userAgent, contentDisposition, mimeType)
+                  }
+
+                  val saved = prefs.getString("url", null)
+                  if (saved.isNullOrBlank()) {
+                      askUrl(null)
+                  } else {
+                      web.loadUrl(saved)
+                  }
+              }
+
+              private fun askUrl(message: String?) {
+                  if (dialogShowing) return
+                  dialogShowing = true
+
+                  val input = EditText(this)
+                  input.hint = "https://xxxx.streamlit.app"
+                  input.setText(prefs.getString("url", "https://"))
+
+                  val builder = AlertDialog.Builder(this)
+                      .setTitle("បញ្ចូល URL របស់ app")
+                      .setView(input)
+                      .setCancelable(false)
+                      .setPositiveButton("យល់ព្រម") { _, _ ->
+                          dialogShowing = false
+                          var u = input.text.toString().trim()
+                          if (u.isNotEmpty()) {
+                              if (!u.startsWith("http")) u = "https://$u"
+                              prefs.edit().putString("url", u).apply()
+                              web.loadUrl(u)
+                          }
+                      }
+
+                  if (message != null) {
+                      builder.setMessage(message)
+                      builder.setNegativeButton("ព្យាយាមម្តងទៀត") { _, _ ->
+                          dialogShowing = false
+                          web.reload()
+                      }
+                  }
+
+                  builder.show()
+              }
+
+              private fun startDownload(
+                  url: String,
+                  userAgent: String?,
+                  contentDisposition: String?,
+                  mimeType: String?
+              ) {
+                  try {
+                      val name = URLUtil.guessFileName(url, contentDisposition, mimeType)
+                      val req = DownloadManager.Request(Uri.parse(url))
+
+                      if (!mimeType.isNullOrBlank()) req.setMimeType(mimeType)
+                      if (!userAgent.isNullOrBlank()) req.addRequestHeader("User-Agent", userAgent)
+
+                      val cookie = CookieManager.getInstance().getCookie(url)
+                      if (!cookie.isNullOrBlank()) req.addRequestHeader("Cookie", cookie)
+
+                      req.setNotificationVisibility(
+                          DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                      )
+                      req.setDestinationInExternalPublicDir(
+                          Environment.DIRECTORY_DOWNLOADS,
+                          name
+                      )
+
+                      val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                      dm.enqueue(req)
+
+                      Toast.makeText(this, "កំពុងទាញយក: $name", Toast.LENGTH_LONG).show()
+                  } catch (e: Exception) {
+                      Toast.makeText(this, "ទាញយកមិនបាន: ${e.message}", Toast.LENGTH_LONG).show()
+                  }
+              }
+
+              @Deprecated("Deprecated in Java")
+              override fun onBackPressed() {
+                  if (::web.isInitialized && web.canGoBack()) {
+                      web.goBack()
+                  } else {
+                      super.onBackPressed()
+                  }
+              }
+          }
+          EOF
+
+      - name: Accept Android licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+
+      - name: Build debug APK
+        working-directory: android-app
+        run: gradle assembleDebug --no-daemon
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VideoDownloader-APK
+          path: android-app/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Publish APK to Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: Video Downloader APK ${{ github.run_number }}
+          files: android-app/app/build/outputs/apk/debug/app-debug.apk
+          
