@@ -191,6 +191,35 @@ def build_attempts(url, has_ffmpeg, playlist):
     return attempts
 
 
+def download_via_tikwm(url, folder):
+    """ជម្រើសបម្រុងសម្រាប់ TikTok ពេល yt-dlp បរាជ័យ (ប្រើសេវាកម្មភាគីទីបី)"""
+    r = requests.post(
+        "https://www.tikwm.com/api/",
+        data={"url": url, "hd": 1},
+        headers={"User-Agent": UA},
+        timeout=30,
+    )
+    j = r.json()
+    if j.get("code") != 0:
+        raise RuntimeError(f"tikwm: {j.get('msg')}")
+    d = j.get("data") or {}
+    play = d.get("hdplay") or d.get("play")
+    if not play:
+        raise RuntimeError("tikwm: រកមិនឃើញ link វីដេអូ (ប្រហែលជាប៉ុស្តិ៍រូបភាព)")
+    if play.startswith("/"):
+        play = "https://www.tikwm.com" + play
+    vid = str(d.get("id") or "video")
+    path = os.path.join(folder, f"tikwm_{vid}.mp4")
+    with requests.get(
+        play, headers={"User-Agent": UA}, stream=True, timeout=60
+    ) as resp:
+        resp.raise_for_status()
+        with open(path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=1024 * 256):
+                if chunk:
+                    f.write(chunk)
+
+
 def find_videos(folder):
     names = sorted(os.listdir(folder))
     return [n for n in names if n.lower().endswith(tuple(MIME_TYPES))]
@@ -198,6 +227,8 @@ def find_videos(folder):
 
 def friendly_hint(err_text):
     t = err_text.lower()
+    if "no video formats found" in t:
+        return "គេហទំព័រមិនផ្តល់ link វីដេអូមក server នេះទេ (ប្រហែលជារារាំង IP ឬជាប៉ុស្តិ៍រូបភាព)។"
     if "ip address is blocked" in t or "blocked" in t or "403" in t or "429" in t:
         return "គេហទំព័របានរារាំង server នេះ (IP របស់ Streamlit Cloud)។ សូមសាកល្បង link ផ្សេង ឬដំណើរការ app លើកុំព្យូទ័រផ្ទាល់ខ្លួន។"
     if "private" in t or "login" in t or "sign in" in t or "cookies" in t:
@@ -247,6 +278,13 @@ if st.button("Download", type="primary"):
                 videos = find_videos(tmp_dir)
                 if videos:
                     break
+
+            if not videos and "tiktok.com" in url.lower():
+                try:
+                    download_via_tikwm(url, tmp_dir)
+                except Exception as e:  # noqa: BLE001
+                    errors.append(f"[ជម្រើសបម្រុង] {e}")
+                videos = find_videos(tmp_dir)
 
         if videos:
             for name in videos:
