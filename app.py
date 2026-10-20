@@ -126,10 +126,11 @@ def extract_url(text):
 
         part = part.strip(" \t\r\n<>\"'")
 
-        # ដកសញ្ញាចុងបញ្ចប់ដែលមិនមែនជាផ្នែកនៃ URL
         part = part.rstrip(".,!?;)]}")
 
-        if part.lower().startswith(("http://", "https://")):
+        if part.lower().startswith(
+            ("http://", "https://")
+        ):
             return part
 
     if "." in text and " " not in text:
@@ -139,23 +140,26 @@ def extract_url(text):
 
 
 def is_tiktok_url(url):
-    """ពិនិត្យ TikTok URL។"""
+    """ពិនិត្យថា URL ជា TikTok ឬអត់។"""
 
     try:
         host = urlparse(url).netloc.lower()
+
         return (
             host == "tiktok.com"
             or host.endswith(".tiktok.com")
         )
+
     except Exception:
         return False
 
 
 def resolve_short_link(url):
     """
-    តាម Short URL ទៅជា URL ពេញ។
+    តាម Short Link ទៅ Link ពេញ។
 
-    ប្រើ GET ដើម្បីឱ្យ server អាចទទួល redirect។
+    សម្រាប់ TikTok បើ redirect ទៅ 404
+    ឬមិនអាចរក Link ពេញបាន គឺរក្សា Link ដើម។
     """
 
     try:
@@ -171,56 +175,50 @@ def resolve_short_link(url):
         if not is_short:
             return url
 
-        session = requests.Session()
-
-        response = session.get(
+        response = requests.get(
             url,
             headers={"User-Agent": UA},
             allow_redirects=True,
-            timeout=25,
+            timeout=20,
             stream=True,
         )
 
         final_url = response.url
+        status_code = response.status_code
+
         response.close()
 
-        if final_url and final_url.startswith("http"):
+        if not final_url:
+            return url
+
+        # TikTok redirect ទៅ 404 មិនត្រូវយក URL នោះទេ
+        if is_tiktok_url(url):
+
+            final_path = urlparse(final_url).path.lower()
+
+            if (
+                status_code >= 400
+                or "/404" in final_path
+                or "fromurl=" in final_url.lower()
+            ):
+                return url
+
+            # ប្រើ Link ពេញ បើ redirect បានត្រឹមត្រូវ
+            if "/video/" in final_url:
+                return final_url
+
+            # បើ redirect មិនបាន Link វីដេអូ
+            # រក្សា Link ខ្លីដើម
+            return url
+
+        if (
+            final_url.startswith("http")
+            and status_code < 400
+        ):
             return final_url
 
     except Exception:
         pass
-
-    return url
-
-
-def normalize_tiktok_url(url):
-    """
-    បម្លែង TikTok URL ទៅជា URL វីដេអូពេញ។
-
-    ឧទាហរណ៍:
-    vt.tiktok.com/xxxx
-    -> www.tiktok.com/@user/video/123456
-    """
-
-    url = resolve_short_link(url)
-
-    if not is_tiktok_url(url):
-        return url
-
-    # រក Video ID ពី URL
-    match = re.search(
-        r"/video/(\d+)",
-        url
-    )
-
-    if match:
-        video_id = match.group(1)
-
-        # បង្កើត URL ស្តង់ដារដោយមិនចាំបាច់រក username
-        return (
-            "https://www.tiktok.com/"
-            f"video/{video_id}"
-        )
 
     return url
 
@@ -242,7 +240,7 @@ def get_impersonate_target():
 
 
 def is_playlist_link(url):
-    """ពិនិត្យថា Link ជា Playlist/Profile ឬវីដេអូតែមួយ។"""
+    """ពិនិត្យ Playlist/Profile។"""
 
     try:
         options = {
@@ -259,6 +257,7 @@ def is_playlist_link(url):
         }
 
         with yt_dlp.YoutubeDL(options) as ydl:
+
             info = ydl.extract_info(
                 url,
                 download=False,
@@ -274,13 +273,10 @@ def is_playlist_link(url):
 
 
 def build_attempts(url, has_ffmpeg, playlist):
-    """
-    បង្កើតវិធីទាញយកផ្សេងៗ។
-
-    TikTok ប្រើវិធីខុសពីគេហទំព័រផ្សេង។
-    """
+    """បង្កើតវិធីទាញយកវីដេអូ។"""
 
     tiktok = is_tiktok_url(url)
+
     imp = get_impersonate_target()
 
     if tiktok:
@@ -338,12 +334,13 @@ def build_attempts(url, has_ffmpeg, playlist):
             opt["merge_output_format"] = "mp4"
 
         if playlist:
-            opt["playlist_items"] = f"1-{MAX_VIDEOS}"
+            opt["playlist_items"] = (
+                f"1-{MAX_VIDEOS}"
+            )
 
         if imp is not None:
             opt["impersonate"] = imp
 
-        # TikTok extractor arguments
         if tiktok and idx == 2:
 
             opt["extractor_args"] = {
@@ -360,14 +357,9 @@ def build_attempts(url, has_ffmpeg, playlist):
 
 
 def download_via_tikwm(url, folder):
-    """
-    TikTok ជម្រើសបម្រុង។
+    """វិធីបម្រុងសម្រាប់ TikTok។"""
 
-    ផ្ញើ TikTok URL ពេញទៅ TikWM API។
-    """
-
-    url = normalize_tiktok_url(url)
-
+    # ប្រើ URL ដែលទទួលបាន មិនបង្កើត URL /404 ទេ
     response = requests.post(
         "https://www.tikwm.com/api/",
         data={
@@ -384,34 +376,31 @@ def download_via_tikwm(url, folder):
     response.raise_for_status()
 
     try:
-        data_json = response.json()
+        j = response.json()
+
     except Exception:
         raise RuntimeError(
-            "TikWM មិនបានផ្ញើ JSON ត្រឹមត្រូវមកវិញ។"
+            "TikWM មិនបានផ្ញើ JSON ត្រឹមត្រូវ។"
         )
 
-    code = data_json.get("code")
-
-    if str(code) != "0":
-
-        msg = data_json.get("msg") or "Unknown error"
+    if str(j.get("code")) != "0":
 
         raise RuntimeError(
-            f"TikWM API error: {msg}"
+            f"TikWM API error: {j.get('msg')}"
         )
 
-    data = data_json.get("data") or {}
+    d = j.get("data") or {}
 
     play = (
-        data.get("hdplay")
-        or data.get("play")
-        or data.get("wmplay")
+        d.get("hdplay")
+        or d.get("play")
+        or d.get("wmplay")
     )
 
     if not play:
 
         raise RuntimeError(
-            "TikWM មិនបានផ្តល់ Video URL។ "
+            "រកមិនឃើញ Link វីដេអូ។ "
             "វីដេអូអាចជា Private ឬមិនមានទៀត។"
         )
 
@@ -422,8 +411,7 @@ def download_via_tikwm(url, folder):
         play = "https://www.tikwm.com" + play
 
     video_id = str(
-        data.get("id")
-        or "video"
+        d.get("id") or "video"
     )
 
     path = os.path.join(
@@ -448,7 +436,7 @@ def download_via_tikwm(url, folder):
         if "text/html" in content_type:
 
             raise RuntimeError(
-                "TikWM បានផ្ញើ HTML មិនមែន Video មកវិញ។"
+                "TikWM បានផ្ញើ HTML មិនមែន Video។"
             )
 
         with open(path, "wb") as f:
@@ -460,23 +448,25 @@ def download_via_tikwm(url, folder):
                 if chunk:
                     f.write(chunk)
 
-    if not os.path.exists(path):
-        raise RuntimeError(
-            "រកមិនឃើញឯកសារវីដេអូក្រោយទាញយក។"
-        )
+    if (
+        not os.path.exists(path)
+        or os.path.getsize(path) < 1024
+    ):
 
-    if os.path.getsize(path) < 1024:
-        os.remove(path)
+        if os.path.exists(path):
+            os.remove(path)
 
         raise RuntimeError(
-            "ឯកសារវីដេអូមានទំហំតូចពេក។"
+            "ឯកសារវីដេអូទាញយកមិនបានពេញលេញ។"
         )
 
 
 def find_videos(folder):
-    """រកឯកសារវីដេអូក្នុង Folder។"""
+    """រកឯកសារវីដេអូ។"""
 
-    names = sorted(os.listdir(folder))
+    names = sorted(
+        os.listdir(folder)
+    )
 
     return [
         name
@@ -488,7 +478,7 @@ def find_videos(folder):
 
 
 def friendly_hint(err_text):
-    """បង្ហាញ Error ជាភាសាខ្មែរ។"""
+    """បកស្រាយ Error ជាភាសាខ្មែរ។"""
 
     t = err_text.lower()
 
@@ -500,8 +490,18 @@ def friendly_hint(err_text):
         return (
             "TikTok មិនបានផ្តល់ Video Format មក server ទេ។ "
             "អាចបណ្តាលមកពី yt-dlp ចាស់ ឬ TikTok "
-            "រារាំង server របស់ Streamlit Cloud។ "
-            "សូម Update yt-dlp ឬសាកល្បងលើកុំព្យូទ័រផ្ទាល់ខ្លួន។"
+            "រារាំង server របស់ Streamlit Cloud។"
+        )
+
+    if (
+        "unsupported url" in t
+        or "url parsing" in t
+    ):
+
+        return (
+            "Link មិនត្រឹមត្រូវ ឬសេវាទាញយក "
+            "មិនអាចបកស្រាយ Link នេះបាន។ "
+            "សូម Copy Link ថ្មីពី TikTok។"
         )
 
     if (
@@ -528,17 +528,6 @@ def friendly_hint(err_text):
             "វីដេអូនេះអាចជា Private ឬត្រូវការ Login។"
         )
 
-    if (
-        "unsupported url" in t
-        or "url parsing" in t
-    ):
-
-        return (
-            "Link មិនត្រឹមត្រូវ ឬសេវាទាញយក "
-            "មិនអាចបកស្រាយ Link នេះបាន។ "
-            "សូម Copy Link ថ្មីពី TikTok។"
-        )
-
     if "ffmpeg" in t:
 
         return (
@@ -563,7 +552,7 @@ def friendly_hint(err_text):
 
 
 # ==================================================
-# DOWNLOAD
+# DOWNLOAD BUTTON
 # ==================================================
 
 if st.button("Download", type="primary"):
@@ -594,21 +583,12 @@ if st.button("Download", type="primary"):
         shutil.which("ffmpeg") is not None
     )
 
-    # Resolve short link
-    with st.spinner(
-        "កំពុងពិនិត្យ Link..."
-    ):
+    # TikTok: រក្សា Link ដើម បើ redirect ខូច
+    with st.spinner("កំពុងពិនិត្យ Link..."):
 
         url = resolve_short_link(
             orig_url
         )
-
-        # TikTok canonical URL
-        if is_tiktok_url(url):
-
-            url = normalize_tiktok_url(
-                url
-            )
 
         playlist = is_playlist_link(
             url
@@ -632,6 +612,7 @@ if st.button("Download", type="primary"):
             "កំពុងទាញយកវីដេអូ..."
         ):
 
+            # សាកល្បង yt-dlp
             for n, opt in enumerate(
                 attempts,
                 start=1,
@@ -665,16 +646,22 @@ if st.button("Download", type="primary"):
                 if videos:
                     break
 
-            # TikTok fallback
+            # TikTok backup
             if (
                 not videos
-                and is_tiktok_url(url)
+                and is_tiktok_url(orig_url)
             ):
 
-                # TikWM ទទួល Link ពេញតែម្តង
-                candidates = [
-                    url,
-                ]
+                candidates = []
+
+                # សាកល្បង Link ដើម
+                candidates.append(
+                    orig_url
+                )
+
+                # សាកល្បង Link ពេញ បើខុសពី Link ដើម
+                if url and url not in candidates:
+                    candidates.append(url)
 
                 for cand in candidates:
 
@@ -688,7 +675,7 @@ if st.button("Download", type="primary"):
                     except Exception as e:
 
                         errors.append(
-                            f"[TikWM] {e}"
+                            f"[TikWM {cand[:50]}] {e}"
                         )
 
                     videos = find_videos(
@@ -698,7 +685,7 @@ if st.button("Download", type="primary"):
                     if videos:
                         break
 
-        # Read downloaded files
+        # អានឯកសារវីដេអូ
         if videos:
 
             for name in videos:
@@ -727,7 +714,7 @@ if st.button("Download", type="primary"):
             ignore_errors=True,
         )
 
-    # Failed
+    # បើទាញយកមិនបាន
     if not results:
 
         err_text = (
@@ -753,7 +740,7 @@ if st.button("Download", type="primary"):
 
         st.stop()
 
-    # Success
+    # បើទាញយកបាន
     st.success(
         f"ទាញយកបាន {len(results)} វីដេអូ ✅"
     )
@@ -789,7 +776,7 @@ if st.button("Download", type="primary"):
             on_click="ignore",
         )
 
-    # ZIP multiple videos
+    # ទាញយក ZIP បើមានវីដេអូច្រើន
     if len(results) > 1:
 
         buf = io.BytesIO()
@@ -822,4 +809,4 @@ st.divider()
 st.caption(
     "ប្រើសម្រាប់វីដេអូសាធារណៈ និងការប្រើប្រាស់ផ្ទាល់ខ្លួនប៉ុណ្ណោះ។ "
     "សូមគោរពសិទ្ធិម្ចាស់ និងលក្ខខណ្ឌរបស់គេហទំព័រនីមួយៗ។"
-                                )
+    )
