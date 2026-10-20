@@ -6,7 +6,9 @@ import zipfile
 import streamlit as st
 import yt_dlp
 
-st.set_page_config(page_title="TikTok Downloader", page_icon="🎬", layout="centered")
+MAX_VIDEOS = 20  # ចំនួនវីដេអូអតិបរមា បើ link ជា profile ឬ playlist
+
+st.set_page_config(page_title="Video Downloader", page_icon="🎬", layout="centered")
 
 st.markdown(
     """
@@ -47,8 +49,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("🎬 TikTok Video Downloader")
-st.caption("ដាក់ link វីដេអូសាធារណៈ ហើយចុច Download (សម្រាប់មើលផ្ទាល់ខ្លួនប៉ុណ្ណោះ)")
+st.title("🎬 Video Downloader")
+st.caption("TikTok • Facebook • YouTube • និងគេហទំព័រផ្សេងទៀត (សម្រាប់មើលផ្ទាល់ខ្លួនប៉ុណ្ណោះ)")
 
 link = st.text_input(
     "Link",
@@ -56,12 +58,31 @@ link = st.text_input(
     label_visibility="collapsed",
 )
 
-with st.expander("ជម្រើសបន្ថែម"):
-    want_mp3 = st.checkbox("ទាញយក MP3 (សំឡេង) ផងដែរ", value=False)
-    st.caption("បើ link ជា profile (ឧ. https://www.tiktok.com/@name) សូមជ្រើសចន្លោះវីដេអូ៖")
-    col1, col2 = st.columns(2)
-    start = col1.number_input("ចាប់ពីវីដេអូទី", min_value=1, value=1, step=1)
-    end = col2.number_input("ដល់វីដេអូទី", min_value=1, value=20, step=1)
+MIME_TYPES = {
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+    ".mkv": "video/x-matroska",
+}
+
+
+def is_playlist_link(url):
+    """ពិនិត្យថា link ជា profile / playlist ឬវីដេអូតែមួយ"""
+    try:
+        with yt_dlp.YoutubeDL(
+            {
+                "quiet": True,
+                "extract_flat": True,
+                "ignoreerrors": True,
+                "playlistend": 1,
+                "noplaylist": False,
+            }
+        ) as y:
+            info = y.extract_info(url, download=False)
+        return bool(info) and info.get("_type") == "playlist"
+    except Exception:
+        return False
+
 
 if st.button("Download", type="primary"):
     link = link.strip()
@@ -70,38 +91,37 @@ if st.button("Download", type="primary"):
         st.warning("សូមដាក់ link ជាមុនសិន")
         st.stop()
 
-    if end < start:
-        st.warning("លេខ 'ដល់' ត្រូវធំជាងលេខ 'ចាប់ពី'")
-        st.stop()
-
-    is_single_video = "/video/" in link or "/photo/" in link or "vm.tiktok.com" in link or "vt.tiktok.com" in link or "/t/" in link
     has_ffmpeg = shutil.which("ffmpeg") is not None
+    is_tiktok = "tiktok.com" in link.lower()
     tmp_dir = tempfile.mkdtemp()
+
+    with st.spinner("កំពុងពិនិត្យ link ..."):
+        playlist = is_playlist_link(link)
+
+    # ជ្រើស format តាមគេហទំព័រ
+    if is_tiktok:
+        # ជៀសវាង format "download" ដែលជាធម្មតាមាន watermark
+        fmt = "best[format_id!=download]/best"
+    elif has_ffmpeg:
+        fmt = "bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b"
+    else:
+        fmt = "best[ext=mp4]/best"
 
     options = {
         "outtmpl": os.path.join(tmp_dir, "%(playlist_index|0)03d_%(id)s.%(ext)s"),
-        # ជ្រើស format ដែលមិនមែនជា "download" (ជាធម្មតាមាន watermark) បើមាន
-        "format": "best[format_id!=download]/best",
+        "format": fmt,
         "ignoreerrors": True,
         "quiet": True,
         "noprogress": True,
+        "noplaylist": not playlist,
+        "restrictfilenames": True,
     }
 
-    if not is_single_video:
-        options["playlist_items"] = f"{int(start)}-{int(end)}"
+    if has_ffmpeg and not is_tiktok:
+        options["merge_output_format"] = "mp4"
 
-    if want_mp3:
-        if has_ffmpeg:
-            options["keepvideo"] = True
-            options["postprocessors"] = [
-                {
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "192",
-                }
-            ]
-        else:
-            st.warning("មិនមាន ffmpeg នៅលើម៉ាស៊ីននេះ ដូច្នេះមិនអាចបង្កើត MP3 បានទេ")
+    if playlist:
+        options["playlist_items"] = f"1-{MAX_VIDEOS}"
 
     try:
         with st.spinner("កំពុងទាញយក..."):
@@ -112,43 +132,35 @@ if st.button("Download", type="primary"):
         st.stop()
 
     all_files = sorted(os.listdir(tmp_dir))
-    videos = [f for f in all_files if f.lower().endswith((".mp4", ".mov", ".webm"))]
-    audios = [f for f in all_files if f.lower().endswith(".mp3")]
+    videos = [f for f in all_files if f.lower().endswith(tuple(MIME_TYPES))]
 
     if not videos:
-        st.error("មិនអាចទាញយកបានទេ។ សូមពិនិត្យ link (ត្រូវតែជាវីដេអូសាធារណៈ)")
+        st.error(
+            "មិនអាចទាញយកបានទេ។ សូមពិនិត្យ link (ត្រូវតែជាវីដេអូសាធារណៈ "
+            "ហើយមិនត្រូវការ login)"
+        )
         st.stop()
 
     st.success(f"ទាញយកបាន {len(videos)} វីដេអូ ✅")
 
     for i, name in enumerate(videos, start=1):
         path = os.path.join(tmp_dir, name)
+        ext = os.path.splitext(name)[1].lower()
         st.markdown(f"**វីដេអូទី {i}**")
         if len(videos) == 1:
             st.video(path)
         with open(path, "rb") as f:
             st.download_button(
-                f"⬇️ Download MP4 ({name[:30]})",
+                f"⬇️ Download ({name[:30]})",
                 data=f.read(),
                 file_name=name,
-                mime="video/mp4",
-                key=f"mp4_{i}",
+                mime=MIME_TYPES.get(ext, "video/mp4"),
+                key=f"vid_{i}",
                 on_click="ignore",
             )
-        mp3_name = os.path.splitext(name)[0] + ".mp3"
-        if mp3_name in audios:
-            with open(os.path.join(tmp_dir, mp3_name), "rb") as f:
-                st.download_button(
-                    "🎵 Download MP3",
-                    data=f.read(),
-                    file_name=mp3_name,
-                    mime="audio/mpeg",
-                    key=f"mp3_{i}",
-                    on_click="ignore",
-                )
 
     if len(videos) > 1:
-        zip_path = os.path.join(tmp_dir, "tiktok_videos.zip")
+        zip_path = os.path.join(tmp_dir, "videos.zip")
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
             for name in videos:
                 zf.write(os.path.join(tmp_dir, name), arcname=name)
@@ -156,7 +168,7 @@ if st.button("Download", type="primary"):
             st.download_button(
                 f"📦 ទាញយក ZIP ({len(videos)} វីដេអូ)",
                 data=zf.read(),
-                file_name=f"tiktok_{int(start)}-{int(end)}.zip",
+                file_name="videos.zip",
                 mime="application/zip",
                 key="zip_all",
                 on_click="ignore",
@@ -165,5 +177,5 @@ if st.button("Download", type="primary"):
 st.divider()
 st.caption(
     "ប្រើសម្រាប់វីដេអូសាធារណៈ និងការប្រើប្រាស់ផ្ទាល់ខ្លួនប៉ុណ្ណោះ។ "
-    "សូមគោរពសិទ្ធិម្ចាស់ និងលក្ខខណ្ឌរបស់ TikTok។"
+    "សូមគោរពសិទ្ធិម្ចាស់ និងលក្ខខណ្ឌរបស់គេហទំព័រនីមួយៗ។"
 )
