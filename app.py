@@ -2,6 +2,8 @@ import re
 import html
 import base64
 import io
+import zipfile
+import time
 import requests
 import streamlit as st
 from urllib.parse import urlparse
@@ -35,14 +37,9 @@ st.set_page_config(
     layout="centered",
 )
 
-# =========================
-# CUSTOM CSS
-# =========================
-
 st.markdown(
     """
     <style>
-    /* លាក់របារខាងលើ និង Footer */
     #MainMenu {
         visibility: hidden;
     }
@@ -56,12 +53,10 @@ st.markdown(
         visibility: hidden;
     }
 
-    /* លាក់ Deploy Button */
     .stDeployButton {
         display: none;
     }
 
-    /* Background */
     .stApp {
         background: linear-gradient(
             135deg,
@@ -71,7 +66,6 @@ st.markdown(
         );
     }
 
-    /* Text */
     h1, p, label, .stMarkdown {
         color: #ffffff !important;
     }
@@ -81,7 +75,6 @@ st.markdown(
         font-weight: 800;
     }
 
-    /* Input */
     div[data-baseweb="input"] > div {
         background: #efe6ff !important;
         border-radius: 14px !important;
@@ -93,7 +86,6 @@ st.markdown(
         padding: 14px !important;
     }
 
-    /* Buttons */
     .stButton > button,
     .stDownloadButton > button {
         width: 100%;
@@ -117,7 +109,6 @@ st.markdown(
         filter: brightness(1.1);
     }
 
-    /* Info Box */
     .info-box {
         background: rgba(255,255,255,0.12);
         padding: 18px;
@@ -131,39 +122,60 @@ st.markdown(
 )
 
 # =========================
-# APP TITLE
+# TITLE
 # =========================
 
 st.title("🎬 Video Downloader")
 
 st.caption(
-    "TikTok • Short Drama • Facebook • YouTube • Instagram • X"
+    "TikTok Short Drama Downloader"
 )
 
 st.markdown(
     """
     <div class="info-box">
-    ទាញយកវីដេអូ TikTok និង Short Drama
-    ដោយប្រើ SSSTik។
+    ទាញយក Episode ច្រើនក្នុងពេលតែមួយ
+    ហើយបញ្ចូលជាឯកសារ ZIP មួយ។
     </div>
     """,
     unsafe_allow_html=True,
 )
 
+# =========================
+# INPUT
+# =========================
+
 link = st.text_input(
-    "Link",
-    placeholder="Paste TikTok Short Drama link here",
-    label_visibility="collapsed",
+    "Short Drama Link",
+    placeholder="Paste TikTok Short Drama Episode Link",
+    label_visibility="visible",
 )
+
+col1, col2 = st.columns(2)
+
+with col1:
+    start_episode = st.number_input(
+        "Episode ចាប់ផ្តើម",
+        min_value=1,
+        max_value=500,
+        value=1,
+        step=1,
+    )
+
+with col2:
+    end_episode = st.number_input(
+        "Episode បញ្ចប់",
+        min_value=1,
+        max_value=500,
+        value=70,
+        step=1,
+    )
 
 # =========================
 # URL FUNCTIONS
 # =========================
 
 def extract_url(text):
-    """
-    ទាញយក URL ពីអត្ថបទដែលបាន Paste។
-    """
     text = text.strip()
 
     for part in text.replace("\n", " ").split():
@@ -174,9 +186,6 @@ def extract_url(text):
 
 
 def validate_url(url):
-    """
-    ពិនិត្យ URL មុនផ្ញើទៅ SSSTik។
-    """
     try:
         parsed = urlparse(url)
 
@@ -201,14 +210,49 @@ def validate_url(url):
         return False
 
 
+def make_episode_url(url, episode_number):
+    """
+    ប្ដូរលេខ Episode នៅចុង URL។
+    ឧទាហរណ៍:
+    /shortdrama/episode/12345/3
+    ទៅ:
+    /shortdrama/episode/12345/4
+    """
+
+    parsed = urlparse(url)
+
+    path = parsed.path.rstrip("/")
+
+    match = re.search(
+        r"(/shortdrama/episode/[^/]+)/(\d+)$",
+        path,
+        flags=re.I,
+    )
+
+    if not match:
+        raise RuntimeError(
+            "Link មិនមែនជា Short Drama Episode Link "
+            "ដែលមានលេខ Episode នៅចុង URL ទេ។"
+    )
+
+    new_path = (
+        match.group(1)
+        + "/"
+        + str(episode_number)
+    )
+
+    return parsed._replace(
+        path=new_path,
+        query="",
+        fragment="",
+    ).geturl()
+
+
 # =========================
 # SSSTIK FUNCTIONS
 # =========================
 
 def get_ssstik_token(session):
-    """
-    ទាញយក Token ថ្មីពី SSSTik។
-    """
 
     response = session.get(
         SSSTIK_BASE + "/en",
@@ -223,7 +267,6 @@ def get_ssstik_token(session):
 
     page = response.text
 
-    # SSSTik token
     match = re.search(
         r"s_tt\s*=\s*['\"]([^'\"]+)['\"]",
         page,
@@ -237,13 +280,11 @@ def get_ssstik_token(session):
 
     if not match:
         raise RuntimeError(
-            "រកមិនឃើញ SSSTik Token។ "
-            "សេវា SSSTik អាចបានផ្លាស់ប្តូរប្រព័ន្ធ។"
+            "រកមិនឃើញ SSSTik Token។"
         )
 
     token = match.group(1)
 
-    # SSSTik form endpoint
     furl_match = re.search(
         r"s_furl\s*=\s*['\"]([^'\"]+)['\"]",
         page,
@@ -259,9 +300,6 @@ def get_ssstik_token(session):
 
 
 def clean_html(text):
-    """
-    សម្អាត HTML entities។
-    """
     text = html.unescape(text or "")
     text = re.sub(r"<[^>]+>", "", text)
 
@@ -269,10 +307,6 @@ def clean_html(text):
 
 
 def decode_ssstik_link(url):
-    """
-    Decode Link របស់ ssscdn.io
-    ប្រសិនបើវាជា Base64 URL។
-    """
 
     if "ssscdn.io" not in url:
         return url
@@ -296,9 +330,6 @@ def decode_ssstik_link(url):
 
 
 def parse_ssstik_response(page):
-    """
-    រក Link វីដេអូ MP4 ពី HTML របស់ SSSTik។
-    """
 
     links = re.findall(
         r'<a\b([^>]*?)>',
@@ -338,18 +369,17 @@ def parse_ssstik_response(page):
             else ""
         )
 
-        # Link វីដេអូគ្មាន Watermark
         if (
             "without_watermark" in css_class
             or "download_link" in css_class
             or "dl-button" in css_class
         ):
+
             href = decode_ssstik_link(href)
 
             if href not in video_links:
                 video_links.append(href)
 
-    # វិធីបម្រុង៖ រក Link MP4 ក្នុង HTML
     if not video_links:
 
         matches = re.findall(
@@ -367,6 +397,7 @@ def parse_ssstik_response(page):
                 or "ssscdn" in href.lower()
                 or "tikcdn" in href.lower()
             ):
+
                 href = decode_ssstik_link(href)
 
                 if href not in video_links:
@@ -376,10 +407,6 @@ def parse_ssstik_response(page):
 
 
 def download_from_ssstik(url):
-    """
-    ផ្ញើ TikTok URL ទៅ SSSTik
-    ហើយទទួល Link ទាញយក។
-    """
 
     session = requests.Session()
 
@@ -387,12 +414,10 @@ def download_from_ssstik(url):
 
     try:
 
-        # 1. ទាញ Token
         token, endpoint = get_ssstik_token(
             session
         )
 
-        # 2. ផ្ញើ Link ទៅ SSSTik
         payload = {
             "id": url,
             "locale": "en",
@@ -421,7 +446,6 @@ def download_from_ssstik(url):
 
         response.raise_for_status()
 
-        # 3. Parse Link វីដេអូ
         video_links = parse_ssstik_response(
             response.text
         )
@@ -434,7 +458,6 @@ def download_from_ssstik(url):
 
             raise RuntimeError(
                 "SSSTik មិនបានបញ្ជូន Link វីដេអូមកវិញ។ "
-                "អាចជាបញ្ហា Short Drama ឬ Server។\n"
                 + message
             )
 
@@ -449,9 +472,6 @@ def download_from_ssstik(url):
 # =========================
 
 def fetch_video(video_url):
-    """
-    ទាញយក MP4 ពី Link ដែល SSSTik បានបញ្ជូន។
-    """
 
     response = requests.get(
         video_url,
@@ -474,11 +494,11 @@ def fetch_video(video_url):
         "text/html" in content_type
         or "application/json" in content_type
     ):
+
         response.close()
 
         raise RuntimeError(
-            "Link ដែល SSSTik បញ្ជូនមក "
-            "មិនមែនជា Video File ទេ។"
+            "Link មិនមែនជា Video File ទេ។"
         )
 
     buffer = io.BytesIO()
@@ -488,6 +508,7 @@ def fetch_video(video_url):
         for chunk in response.iter_content(
             chunk_size=1024 * 256
         ):
+
             if chunk:
                 buffer.write(chunk)
 
@@ -505,75 +526,201 @@ def fetch_video(video_url):
 
 
 # =========================
+# BULK DOWNLOAD
+# =========================
+
+def download_all_episodes(
+    base_url,
+    first_episode,
+    last_episode,
+):
+
+    zip_buffer = io.BytesIO()
+
+    successful = []
+    failed = []
+
+    total = last_episode - first_episode + 1
+
+    progress = st.progress(0)
+
+    status = st.empty()
+
+    with zipfile.ZipFile(
+        zip_buffer,
+        mode="w",
+        compression=zipfile.ZIP_DEFLATED,
+    ) as zip_file:
+
+        for index, episode in enumerate(
+            range(first_episode, last_episode + 1),
+            start=1,
+        ):
+
+            episode_url = make_episode_url(
+                base_url,
+                episode,
+            )
+
+            status.info(
+                f"កំពុងទាញយក Episode {episode} "
+                f"({index}/{total})"
+            )
+
+            try:
+
+                # រក Link តាម SSSTik
+                video_links = download_from_ssstik(
+                    episode_url
+                )
+
+                # យក Link វីដេអូដំបូង
+                video_url = video_links[0]
+
+                # ទាញយកវីដេអូ
+                video_data = fetch_video(
+                    video_url
+                )
+
+                # ដាក់វីដេអូចូល ZIP
+                zip_file.writestr(
+                    f"Episode_{episode:03d}.mp4",
+                    video_data,
+                )
+
+                successful.append(episode)
+
+            except Exception as error:
+
+                failed.append(
+                    {
+                        "episode": episode,
+                        "error": str(error),
+                    }
+                )
+
+            progress.progress(
+                index / total
+            )
+
+            # សម្រាកបន្តិច ដើម្បីកុំផ្ញើ Request លឿនពេក
+            time.sleep(1)
+
+    status.success(
+        "ការទាញយកបានបញ្ចប់។"
+    )
+
+    zip_buffer.seek(0)
+
+    return (
+        zip_buffer.getvalue(),
+        successful,
+        failed,
+    )
+
+
+# =========================
 # MAIN
 # =========================
 
-if st.button("Download", type="primary"):
+if st.button(
+    "⬇️ Download All Episodes",
+    type="primary",
+):
 
     raw = link.strip()
 
     if not raw:
+
         st.warning(
-            "សូមដាក់ TikTok Link ជាមុនសិន។"
+            "សូមដាក់ Short Drama Link ជាមុនសិន។"
         )
+
         st.stop()
 
     url = extract_url(raw)
 
     if not validate_url(url):
+
         st.error(
             "Link មិនត្រឹមត្រូវ។ "
-            "សូមប្រើ TikTok Video ឬ Short Drama Link។"
+            "សូមប្រើ TikTok Short Drama Link។"
         )
+
+        st.stop()
+
+    if start_episode > end_episode:
+
+        st.error(
+            "Episode ចាប់ផ្តើមមិនអាចធំជាង "
+            "Episode បញ្ចប់បានទេ។"
+        )
+
         st.stop()
 
     try:
 
-        with st.spinner(
-            "កំពុងភ្ជាប់ទៅ SSSTik..."
-        ):
-
-            video_links = download_from_ssstik(
-                url
-            )
-
-        st.success(
-            f"រកឃើញ Link វីដេអូ {len(video_links)} ✅"
+        # ពិនិត្យថា Link មានទម្រង់ Episode ត្រឹមត្រូវ
+        make_episode_url(
+            url,
+            int(start_episode),
         )
 
-        for i, video_url in enumerate(
-            video_links,
-            start=1,
+        with st.spinner(
+            "កំពុងចាប់ផ្តើមទាញយក..."
         ):
 
-            with st.spinner(
-                f"កំពុងទាញយកវីដេអូទី {i}..."
-            ):
+            zip_data, successful, failed = (
+                download_all_episodes(
+                    url,
+                    int(start_episode),
+                    int(end_episode),
+            )
+        )
 
-                video_data = fetch_video(
-                    video_url
-                )
+        st.success(
+            f"ទាញយកបាន {len(successful)} Episode "
+            f"ក្នុងចំណោម "
+            f"{end_episode - start_episode + 1} Episode។"
+        )
 
-            st.video(video_data)
+        if successful:
 
             st.download_button(
-                label=f"⬇️ Download Video {i}",
-                data=video_data,
-                file_name=f"tiktok_video_{i}.mp4",
-                mime="video/mp4",
-                key=f"download_{i}",
+                label="📦 Download All Videos (ZIP)",
+                data=zip_data,
+                file_name="Short_Drama_Episodes.zip",
+                mime="application/zip",
             )
 
-    except Exception as e:
+        if failed:
+
+            st.warning(
+                f"ទាញយកមិនបាន {len(failed)} Episode។"
+            )
+
+            with st.expander(
+                "មើល Episode ដែលបរាជ័យ"
+            ):
+
+                for item in failed:
+
+                    st.write(
+                        f"Episode {item['episode']}: "
+                        f"{item['error']}"
+                    )
+
+    except Exception as error:
 
         st.error(
-            "មិនអាចទាញយកវីដេអូបានទេ។"
+            "មិនអាចចាប់ផ្តើមទាញយកបានទេ។"
         )
 
         with st.expander(
             "មើល Error លម្អិត"
         ):
-            st.code(str(e))
+
+            st.code(str(error))
 
 
 # =========================
@@ -583,6 +730,6 @@ if st.button("Download", type="primary"):
 st.divider()
 
 st.caption(
-    "ប្រើសម្រាប់វីដេអូសាធារណៈ និងការប្រើប្រាស់ផ្ទាល់ខ្លួន។ "
-    "សូមគោរពសិទ្ធិម្ចាស់វីដេអូ។"
-    )
+    "សូមគោរពសិទ្ធិម្ចាស់វីដេអូ "
+    "និងលក្ខខណ្ឌប្រើប្រាស់របស់ TikTok។"
+)
