@@ -250,7 +250,8 @@ if st.button("Download", type="primary"):
         st.stop()
 
     has_ffmpeg = shutil.which("ffmpeg") is not None
-    url = extract_url(raw)
+    orig_url = extract_url(raw)
+    url = orig_url
 
     with st.spinner("កំពុងពិនិត្យ link ..."):
         url = resolve_short_link(url)
@@ -280,11 +281,18 @@ if st.button("Download", type="primary"):
                     break
 
             if not videos and "tiktok.com" in url.lower():
-                try:
-                    download_via_tikwm(url, tmp_dir)
-                except Exception as e:  # noqa: BLE001
-                    errors.append(f"[ជម្រើសបម្រុង] {e}")
-                videos = find_videos(tmp_dir)
+                variants = []
+                for cand in (orig_url, url.split("?")[0], url):
+                    if cand and cand not in variants:
+                        variants.append(cand)
+                for cand in variants:
+                    try:
+                        download_via_tikwm(cand, tmp_dir)
+                    except Exception as e:  # noqa: BLE001
+                        errors.append(f"[ជម្រើសបម្រុង {cand[:60]}] {e}")
+                    videos = find_videos(tmp_dir)
+                    if videos:
+                        break
 
         if videos:
             for name in videos:
