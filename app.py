@@ -42,7 +42,6 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* លាក់របារខាងលើ និង Footer */
     #MainMenu {
         visibility: hidden;
     }
@@ -56,12 +55,10 @@ st.markdown(
         visibility: hidden;
     }
 
-    /* លាក់ Deploy Button */
     .stDeployButton {
         display: none;
     }
 
-    /* Background */
     .stApp {
         background: linear-gradient(
             135deg,
@@ -71,7 +68,6 @@ st.markdown(
         );
     }
 
-    /* Text */
     h1, p, label, .stMarkdown {
         color: #ffffff !important;
     }
@@ -81,7 +77,6 @@ st.markdown(
         font-weight: 800;
     }
 
-    /* Input */
     div[data-baseweb="input"] > div {
         background: #efe6ff !important;
         border-radius: 14px !important;
@@ -93,14 +88,14 @@ st.markdown(
         padding: 14px !important;
     }
 
-    /* Buttons */
     .stButton > button,
-    .stDownloadButton > button {
+    .stDownloadButton > button,
+    .stLinkButton > a {
         width: 100%;
         padding: 0.9rem 1rem;
-        font-size: 20px;
+        font-size: 18px;
         font-weight: 700;
-        color: #ffffff;
+        color: #ffffff !important;
         border: 2px solid #ffffff;
         border-radius: 14px;
         background: linear-gradient(
@@ -111,13 +106,13 @@ st.markdown(
     }
 
     .stButton > button:hover,
-    .stDownloadButton > button:hover {
-        color: #ffffff;
+    .stDownloadButton > button:hover,
+    .stLinkButton > a:hover {
+        color: #ffffff !important;
         border-color: #ffffff;
         filter: brightness(1.1);
     }
 
-    /* Info Box */
     .info-box {
         background: rgba(255,255,255,0.12);
         padding: 18px;
@@ -125,6 +120,7 @@ st.markdown(
         margin-top: 15px;
         color: white;
     }
+
     </style>
     """,
     unsafe_allow_html=True,
@@ -164,10 +160,13 @@ def extract_url(text):
     """
     ទាញយក URL ពីអត្ថបទដែលបាន Paste។
     """
+
     text = text.strip()
 
     for part in text.replace("\n", " ").split():
+
         if part.startswith(("http://", "https://")):
+
             return part.strip()
 
     return text
@@ -175,9 +174,11 @@ def extract_url(text):
 
 def validate_url(url):
     """
-    ពិនិត្យ URL មុនផ្ញើទៅ SSSTik។
+    ពិនិត្យ TikTok URL។
     """
+
     try:
+
         parsed = urlparse(url)
 
         if parsed.scheme not in ("http", "https"):
@@ -198,6 +199,7 @@ def validate_url(url):
         )
 
     except Exception:
+
         return False
 
 
@@ -223,19 +225,21 @@ def get_ssstik_token(session):
 
     page = response.text
 
-    # SSSTik token
+    # រក SSSTik Token
     match = re.search(
         r"s_tt\s*=\s*['\"]([^'\"]+)['\"]",
         page,
     )
 
     if not match:
+
         match = re.search(
             r"tt\s*:\s*['\"]([^'\"]+)['\"]",
             page,
         )
 
     if not match:
+
         raise RuntimeError(
             "រកមិនឃើញ SSSTik Token។ "
             "សេវា SSSTik អាចបានផ្លាស់ប្តូរប្រព័ន្ធ។"
@@ -243,7 +247,7 @@ def get_ssstik_token(session):
 
     token = match.group(1)
 
-    # SSSTik form endpoint
+    # រក Form Endpoint
     furl_match = re.search(
         r"s_furl\s*=\s*['\"]([^'\"]+)['\"]",
         page,
@@ -262,22 +266,29 @@ def clean_html(text):
     """
     សម្អាត HTML entities។
     """
+
     text = html.unescape(text or "")
-    text = re.sub(r"<[^>]+>", "", text)
+
+    text = re.sub(
+        r"<[^>]+>",
+        "",
+        text,
+    )
 
     return text.strip()
 
 
 def decode_ssstik_link(url):
     """
-    Decode Link របស់ ssscdn.io
-    ប្រសិនបើវាជា Base64 URL។
+    Decode Link របស់ ssscdn.io។
     """
 
     if "ssscdn.io" not in url:
+
         return url
 
     try:
+
         parts = url.split("/")
 
         encoded = "/".join(parts[5:])
@@ -287,9 +298,11 @@ def decode_ssstik_link(url):
         ).decode("utf-8")
 
         if decoded.startswith("http"):
+
             return decoded
 
     except Exception:
+
         pass
 
     return url
@@ -323,6 +336,7 @@ def parse_ssstik_response(page):
         )
 
         if not href_match:
+
             continue
 
         href = html.unescape(
@@ -330,6 +344,7 @@ def parse_ssstik_response(page):
         )
 
         if not href.startswith("http"):
+
             continue
 
         css_class = (
@@ -338,18 +353,20 @@ def parse_ssstik_response(page):
             else ""
         )
 
-        # Link វីដេអូគ្មាន Watermark
+        # រក Link វីដេអូ
         if (
             "without_watermark" in css_class
             or "download_link" in css_class
             or "dl-button" in css_class
         ):
+
             href = decode_ssstik_link(href)
 
             if href not in video_links:
+
                 video_links.append(href)
 
-    # វិធីបម្រុង៖ រក Link MP4 ក្នុង HTML
+    # វិធីបម្រុង
     if not video_links:
 
         matches = re.findall(
@@ -367,9 +384,11 @@ def parse_ssstik_response(page):
                 or "ssscdn" in href.lower()
                 or "tikcdn" in href.lower()
             ):
+
                 href = decode_ssstik_link(href)
 
                 if href not in video_links:
+
                     video_links.append(href)
 
     return video_links
@@ -441,6 +460,7 @@ def download_from_ssstik(url):
         return video_links
 
     finally:
+
         session.close()
 
 
@@ -474,6 +494,7 @@ def fetch_video(video_url):
         "text/html" in content_type
         or "application/json" in content_type
     ):
+
         response.close()
 
         raise RuntimeError(
@@ -488,15 +509,19 @@ def fetch_video(video_url):
         for chunk in response.iter_content(
             chunk_size=1024 * 256
         ):
+
             if chunk:
+
                 buffer.write(chunk)
 
     finally:
+
         response.close()
 
     data = buffer.getvalue()
 
     if not data:
+
         raise RuntimeError(
             "Video File ទទេ។"
         )
@@ -513,18 +538,22 @@ if st.button("Download", type="primary"):
     raw = link.strip()
 
     if not raw:
+
         st.warning(
             "សូមដាក់ TikTok Link ជាមុនសិន។"
         )
+
         st.stop()
 
     url = extract_url(raw)
 
     if not validate_url(url):
+
         st.error(
             "Link មិនត្រឹមត្រូវ។ "
             "សូមប្រើ TikTok Video ឬ Short Drama Link។"
         )
+
         st.stop()
 
     try:
@@ -554,7 +583,15 @@ if st.button("Download", type="primary"):
                     video_url
                 )
 
+            # =========================
+            # VIDEO PREVIEW
+            # =========================
+
             st.video(video_data)
+
+            # =========================
+            # DOWNLOAD BUTTON
+            # =========================
 
             st.download_button(
                 label=f"⬇️ Download Video {i}",
@@ -562,6 +599,38 @@ if st.button("Download", type="primary"):
                 file_name=f"tiktok_video_{i}.mp4",
                 mime="video/mp4",
                 key=f"download_{i}",
+                use_container_width=True,
+            )
+
+            # =========================
+            # OPEN VIDEO
+            # =========================
+
+            st.link_button(
+                label="▶️ Open Video in Safari",
+                url=video_url,
+                use_container_width=True,
+            )
+
+            # =========================
+            # IOS INSTRUCTIONS
+            # =========================
+
+            st.info(
+                """
+                📱 **សម្រាប់ iPhone / iOS**
+
+                បើចុច Download Video ហើយមិនដំណើរការ៖
+
+                1. ចុច Open Video in Safari។
+                2. បើកវីដេអូក្នុង Safari។
+                3. ចុច Share។
+                4. ជ្រើស Save to Files។
+
+                បើចង់រក្សាទុកក្នុង Photos៖
+                បើកវីដេអូក្នុង Files
+                រួចចុច Share → Save Video។
+                """
             )
 
     except Exception as e:
@@ -573,6 +642,7 @@ if st.button("Download", type="primary"):
         with st.expander(
             "មើល Error លម្អិត"
         ):
+
             st.code(str(e))
 
 
